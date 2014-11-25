@@ -180,7 +180,7 @@ class Aparser_Worker
 			unset($tasks_ids[$key]);
 		}
 
-		$this->rewrite_and_close_file($tasks_file, implode("\n", $tasks_ids));
+		$this->rewrite_and_close_file($tasks_file, implode("\n", $tasks_ids) . "\n");
 	}
 
 	public function upload_files($files = array())
