@@ -5,23 +5,21 @@ date_default_timezone_set('Europe/Minsk');
 
 require_once 'aparser-api-php-client.php';
 
-class Akafi
+class Aparser_Worker
 {
 	const RESULTS_DIR = 'results';
-	const TASKS_FILENAME = 'tasks.txt'; //'C:\Users\kirill\Desktop\Aparser1.1.89Beta\results\akaf\akafid.txt'
 	const TASKS_IDS_FILENAME = 'tasks/tasks_ids.txt'; //'C:\Users\kirill\Desktop\Aparser1.1.89Beta\results\akaf\akafid.txt'
+	const CONFIG_FILE_FILENAME = 'config.txt'; //'C:\Users\kirill\Desktop\Aparser1.1.89Beta\results\akaf\akafid.txt'
 
 	protected $_api_server = 'http://127.0.0.1:9092/API';
 	protected $_upload_server = 'base.parser.by';
 	protected $_username = 'base';
 	protected $_key_public = 'keys/public';
 	protected $_key_private = 'keys/private';
-	
-	protected $_country_code = 'SA';
-	protected $_source = 'aparser-A';
-	
+
 	protected $_file_lock = NULL;
-	
+	protected $_config = array();
+
 	public function __construct(){}
 	
 	protected static function arr_get($array, $key, $default = NULL)
@@ -51,6 +49,21 @@ class Akafi
 			die('Already in action');
 		}
 	}
+	
+	protected function load_config()
+	{
+		$config_array = explode("\n", file_get_contents(self::CONFIG_FILE_FILENAME));
+		foreach ($config_array as $config_str)
+		{
+			$config_str_exp = explode('=', $config_str, 2);
+			$this->_config[trim(self::arr_get($config_str_exp, 0))] = trim(self::arr_get($config_str_exp, 1));
+		}
+	}
+
+	protected function get_config($key, $default = NULL)
+	{
+		return self::arr_get($this->_config, $key, $default);
+	}
 
 	protected function open_and_lock_file($filename)
 	{
@@ -72,33 +85,20 @@ class Akafi
 		fclose($file);
 	}
 
-	public function set_task($count = 1000)
+	public function set_task()
 	{
 		$this->set_lock('set_task');
-
-		$tasks_file = $this->open_and_lock_file(self::TASKS_FILENAME);
-		if (!$tasks_file)
-		{
-			return FALSE;
-		}
-
-		$akafi_tasks_ids = fread($tasks_file, filesize(self::TASKS_FILENAME));
-		$akafi_tasks_ids = explode("\n", $akafi_tasks_ids);
-		$akafi_tasks_ids = self::clear_arr($akafi_tasks_ids);
-
-		rsort($akafi_tasks_ids, SORT_NUMERIC);
-		$min_id_key  = (count($akafi_tasks_ids) > 1000 ? 999 : end($akafi_tasks_ids));
-
-		$min_id = $akafi_tasks_ids[$min_id_key];
-		$max_id = $akafi_tasks_ids[0];
+		$this->load_config();
 
 		$aparser = new Aparser($this->_api_server, '', array('debug'=>'true'));
 		$aparser->ping();
 		$aparser->info();
-		$task_id = $aparser->addTask('default', 'akafi.net', 'text', 'https://www.akafi.net/akfnew/Sub-{num:'.$min_id.':'.$max_id.'}.html');
-		
-		$akafi_tasks_ids = array_slice($akafi_tasks_ids, $min_id_key);
-		$this->rewrite_and_close_file($tasks_file, implode("\n", $akafi_tasks_ids));
+		$task_id = $aparser->addTask(
+				$this->get_config('config_preset'),
+				$this->get_config('task_preset'),
+				$this->get_config('query_from'),
+				$this->get_config('task_query')
+		);
 
 		$tasks_file = fopen(self::TASKS_IDS_FILENAME, "a+");
 		flock($tasks_file, LOCK_EX);
@@ -109,6 +109,7 @@ class Akafi
 	public function get_results()
 	{
 		$this->set_lock('get_results');
+		$this->load_config();
 
 		$tasks_file = $this->open_and_lock_file(self::TASKS_IDS_FILENAME);
 		if (!$tasks_file)
@@ -199,7 +200,7 @@ if (!isset($argv[1]))
 	die('Action is not specified');
 }
 
-$akafi_worker = new Akafi();
+$akafi_worker = new Aparser_Worker();
 $method_name = $argv[1];
 if (!method_exists($akafi_worker, $method_name))
 {
