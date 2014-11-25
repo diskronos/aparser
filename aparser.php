@@ -84,6 +84,32 @@ class Aparser_Worker
 		fwrite($file, $data);
 		fclose($file);
 	}
+	
+	protected function send_request($params)
+	{
+		$request = json_encode($params);
+		$ch = curl_init($this->_api_server);
+
+		curl_setopt($ch, CURLOPT_POST, 1);
+		curl_setopt($ch, CURLOPT_POSTFIELDS, $request);
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+		curl_setopt($ch, CURLOPT_HTTPHEADER, array('Content-Length: ' . strlen($request)));
+		curl_setopt($ch, CURLOPT_HTTPHEADER, array('Content-Type: text/plain; charset=UTF-8'));
+
+		$response = curl_exec($ch);
+		curl_close($ch);
+
+		if (!$response)
+		{
+			return FALSE;
+		}
+		$response = json_decode($response, true);
+		if (!self::arr_get($response, 'success'))
+		{
+			return FALSE;
+		}
+		return $response;
+	}
 
 	public function set_task()
 	{
@@ -124,8 +150,8 @@ class Aparser_Worker
 
 		foreach ($tasks_ids as $key => $task_id)
 		{
-			$request = json_encode(array(
-				'action' => 'getTaskResultsFile',
+			$state = $this->send_request(array(
+				'action' => 'getTaskState',
 				'data' => array (
 					'parser' => 'SE::Google',
 					'preset' => 'Pages Count use Proxy',
@@ -134,29 +160,23 @@ class Aparser_Worker
 				'password' => ''
 			));
 
-			$ch = curl_init($this->_api_server);
-
-			curl_setopt($ch, CURLOPT_POST, 1);
-			curl_setopt($ch, CURLOPT_POSTFIELDS, $request);
-			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-			curl_setopt($ch, CURLOPT_HTTPHEADER, array('Content-Length: ' . strlen($request)));
-			curl_setopt($ch, CURLOPT_HTTPHEADER, array('Content-Type: text/plain; charset=UTF-8'));
-
-			$response = curl_exec($ch);
-			curl_close($ch);
-
-			if (!$response)
-			{
-				continue;
-				return FALSE;
-			}
-			$response = json_decode($response, true);
-			if (!self::arr_get($response, 'success'))
+			if (!$state or !isset($state['data']['status']) or $state['data']['status'] != 'completed')
 			{
 				continue;
 			}
+
+			$result = $this->send_request(array(
+					'action' => 'getTaskResultsFile',
+					'data' => array (
+						'parser' => 'SE::Google',
+						'preset' => 'Pages Count use Proxy',
+						'taskUid' => $task_id //947
+						),
+					'password' => ''
+			));
+
 			$results_file = self::RESULTS_DIR . '/task_' . $task_id . '.xml';
-			file_put_contents($results_file, file_get_contents(self::arr_get($response, 'data')));
+			file_put_contents($results_file, file_get_contents(self::arr_get($result, 'data')));
 			unset($tasks_ids[$key]);
 		}
 
