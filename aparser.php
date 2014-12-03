@@ -9,7 +9,8 @@ class Aparser_Worker
 {
 	const RESULTS_DIR = 'results';
 	const TASKS_IDS_FILENAME = 'tasks/tasks_ids.txt'; //'C:\Users\kirill\Desktop\Aparser1.1.89Beta\results\akaf\akafid.txt'
-	const CONFIG_FILE_FILENAME = 'config.txt'; //'C:\Users\kirill\Desktop\Aparser1.1.89Beta\results\akaf\akafid.txt'
+	const CONFIG_FILE_FILENAME = 'config.xml'; //'C:\Users\kirill\Desktop\Aparser1.1.89Beta\results\akaf\akafid.txt'
+	const DELIMITER = '|';
 
 	protected $_api_server = 'http://127.0.0.1:9092/API';
 	protected $_upload_server = 'base.parser.by';
@@ -22,7 +23,7 @@ class Aparser_Worker
 
 	public function __construct(){}
 	
-	protected static function arr_get($array, $key, $default = NULL)
+	public static function arr_get($array, $key, $default = NULL)
 	{
 		if (!is_array($array))
 		{
@@ -50,13 +51,34 @@ class Aparser_Worker
 		}
 	}
 	
-	protected function load_config()
+	protected function load_config($task_name = NULL)
 	{
-		$config_array = explode("\n", file_get_contents(self::CONFIG_FILE_FILENAME));
-		foreach ($config_array as $config_str)
+		$config_loaded = FALSE;
+
+		$dom_doc = new DOMDocument();
+		$dom_doc->loadXML(file_get_contents(self::CONFIG_FILE_FILENAME));
+
+		foreach ($dom_doc->getElementsByTagName('task') as $task)
 		{
-			$config_str_exp = explode('=', $config_str, 2);
-			$this->_config[trim(self::arr_get($config_str_exp, 0))] = trim(self::arr_get($config_str_exp, 1));
+			if ($task->getAttribute('name') == $task_name)
+			{
+				$config_loaded = TRUE;
+				break;
+			}
+		}
+		if (!$config_loaded)
+		{
+			die('Task name not found');
+		}
+		foreach ($task->childNodes as $params)
+		{
+			$config_key = trim($params->localName);
+			$config_value = trim($params->nodeValue);
+			
+			if ($config_key)
+			{
+				$this->_config[$config_key] = $config_value;
+			}
 		}
 	}
 
@@ -111,10 +133,20 @@ class Aparser_Worker
 		return $response;
 	}
 
-	public function set_task()
+	public function set_task($params = array())
 	{
+		$task_name = self::arr_get($params, 0);
+		
+		$save_needed = self::arr_get($params, 1, 'yes');
+		$save_needed = (mb_strtolower($save_needed) == 'yes');
+
+		if (is_null($task_name))
+		{
+			die('Task not specified');
+		}
+
 		$this->set_lock('set_task');
-		$this->load_config();
+		$this->load_config($task_name);
 
 		$aparser = new Aparser($this->_api_server, '', array('debug'=>'true'));
 		$aparser->ping();
@@ -126,16 +158,23 @@ class Aparser_Worker
 				$this->get_config('task_query')
 		);
 
-		$tasks_file = fopen(self::TASKS_IDS_FILENAME, "a+");
-		flock($tasks_file, LOCK_EX);
-		fwrite($tasks_file, $task_id . "\n");
-		fclose($tasks_file);
+		if ($save_needed)
+		{
+			$tasks_file = fopen(self::TASKS_IDS_FILENAME, "a+");
+			flock($tasks_file, LOCK_EX);
+			$task_update = 
+					$task_id . self::DELIMITER . 
+					$task_name . self::DELIMITER .
+					$this->get_config('default_country_code') . self::DELIMITER . 
+					$this->get_config('source') . "\n";
+			fwrite($tasks_file, $task_update);
+			fclose($tasks_file);
+		}
 	}
 
-	public function get_results()
+	public function get_results($params = array())
 	{
 		$this->set_lock('get_results');
-		$this->load_config();
 
 		$tasks_file = $this->open_and_lock_file(self::TASKS_IDS_FILENAME);
 		if (!$tasks_file)
@@ -148,8 +187,15 @@ class Aparser_Worker
 		$tasks_ids = explode("\n", $tasks_file_content);
 		$tasks_ids = self::clear_arr($tasks_ids);
 
-		foreach ($tasks_ids as $key => $task_id)
+		foreach ($tasks_ids as $key => $task_params)
 		{
+			$task_params_arr = explode(self::DELIMITER, $task_params);
+
+			$task_id = self::arr_get($task_params_arr, 0);
+			$task_name = self::arr_get($task_params_arr, 1);
+			$default_country_code = self::arr_get($task_params_arr, 2);
+			$source = self::arr_get($task_params_arr, 3);
+
 			$state = $this->send_request(array(
 				'action' => 'getTaskState',
 				'data' => array (
@@ -175,7 +221,7 @@ class Aparser_Worker
 					'password' => ''
 			));
 
-			$results_file = self::RESULTS_DIR . '/task_' . $task_id . '.xml';
+			$results_file = self::RESULTS_DIR . '/[' . $default_country_code . ']_[' . $source . ']_' . $task_name . '_' . date('d_m_Y') . '.xml';
 			file_put_contents($results_file, file_get_contents(self::arr_get($result, 'data')));
 			unset($tasks_ids[$key]);
 		}
@@ -183,7 +229,7 @@ class Aparser_Worker
 		$this->rewrite_and_close_file($tasks_file, implode("\n", $tasks_ids) . "\n");
 	}
 
-	public function upload_files($files = array())
+	public function upload_files($params = array())
 	{
 		$this->set_lock('upload_files');
 		$files = array_diff(scandir(self::RESULTS_DIR), array('.', '..'));
@@ -208,7 +254,7 @@ class Aparser_Worker
 			ssh2_scp_send(
 					$connection, 
 					self::RESULTS_DIR . '/' . $file, 
-					'/srv/base/app/upload/import/xml/person/[' .$this->_country_code. ']_[' . $this->_source . ']_' . $file, 
+					'/srv/base/app/upload/import/xml/person/' . $file, 
 					0777);
 			unlink(self::RESULTS_DIR . '/' . $file);
 		}
@@ -222,9 +268,13 @@ if (!isset($argv[1]))
 
 $akafi_worker = new Aparser_Worker();
 $method_name = $argv[1];
+
+unset($argv[0]);
+unset($argv[1]);
+
 if (!method_exists($akafi_worker, $method_name))
 {
 	die('Action is not implemented');
 }
 
-$akafi_worker->$method_name();
+$akafi_worker->$method_name(array_merge($argv));

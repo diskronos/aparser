@@ -1,7 +1,0 @@
-country_code=SA
-source=aparser-A
-
-config_preset=default
-task_preset=akafi.net
-query_from=text
-task_query=https://www.akafi.net/akfnew/Sub-{num:1:1000}.html

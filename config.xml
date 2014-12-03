@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tasks>
+    <task name="haradj.com.sa">
+				<default_country_code>SA</default_country_code>
+                <source>aparser-A</source>
+                <config_preset>default</config_preset>
+                <task_preset>haradj.com.sa</task_preset>
+                <query_from>text</query_from>
+                <task_query>https://www.akafi.net/akfnew/Sub-{num:1:1000}.html</task_query>
+        </task>
+
+    <task name="akafi.net">
+				<default_country_code>SA</default_country_code>
+				<source>aparser-A</source>
+				<config_preset>default</config_preset>
+				<task_preset>akafi.net</task_preset>
+				<query_from>text</query_from>
+				<task_query>https://www.akafi.net/akfnew/Sub-{num:1:1000}.html</task_query>
+    </task>
+</tasks>
