@@ -2,3 +2,6 @@
 /_additional
 /tasks/tasks_ids.txt
 /tasks.txt
+/config.xml
+/locks/delete_files.lock
+/tasks/files_to_delete.txt

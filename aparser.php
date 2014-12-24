@@ -9,10 +9,11 @@ class Aparser_Worker
 {
 	const RESULTS_DIR = 'results';
 	const TASKS_IDS_FILENAME = 'tasks/tasks_ids.txt'; //'C:\Users\kirill\Desktop\Aparser1.1.89Beta\results\akaf\akafid.txt'
+	const DELETE_FILES_FILENAME = 'tasks/files_to_delete.txt '; 
 	const CONFIG_FILE_FILENAME = 'config.xml'; //'C:\Users\kirill\Desktop\Aparser1.1.89Beta\results\akaf\akafid.txt'
 	const DELIMITER = '|';
 
-	protected $_api_server = 'http://127.0.0.1:9092/API';
+	protected $_api_server = 'http://127.0.0.1:9095/API';
 	protected $_upload_server = 'base.parser.by';
 	protected $_username = 'base';
 	protected $_key_public = 'keys/public';
@@ -90,6 +91,11 @@ class Aparser_Worker
 	protected function open_and_lock_file($filename)
 	{
 		$file = fopen($filename, 'r+');
+		if (!$file)
+		{
+			return FALSE;
+		}
+
 		flock($file, LOCK_EX);
 		$filesize = filesize($filename);
 		if (!$filesize)
@@ -136,9 +142,6 @@ class Aparser_Worker
 	public function set_task($params = array())
 	{
 		$task_name = self::arr_get($params, 0);
-		
-		$save_needed = self::arr_get($params, 1, 'yes');
-		$save_needed = (mb_strtolower($save_needed) == 'yes');
 
 		if (is_null($task_name))
 		{
@@ -155,8 +158,12 @@ class Aparser_Worker
 				$this->get_config('config_preset'),
 				$this->get_config('task_preset'),
 				$this->get_config('query_from'),
-				$this->get_config('task_query')
+				$this->get_config('task_query'),
+				array('queriesFile' => $this->get_config('queriesFile'))
 		);
+
+		$save_needed = self::arr_get($params, 1, 'yes');
+		$save_needed = (mb_strtolower($save_needed) == 'yes');
 
 		if ($save_needed)
 		{
@@ -169,6 +176,20 @@ class Aparser_Worker
 					$this->get_config('source') . "\n";
 			fwrite($tasks_file, $task_update);
 			fclose($tasks_file);
+		}
+		else
+		{
+			$delete_file = $this->get_config('delete_file');
+			if ($delete_file) 
+			{
+				$tasks_file = fopen(self::DELETE_FILES_FILENAME, "a+");
+				flock($tasks_file, LOCK_EX);
+				$task_update = 
+						$task_id . self::DELIMITER . 
+						$delete_file . "\n";
+				fwrite($tasks_file, $task_update);
+				fclose($tasks_file);
+			}
 		}
 	}
 
@@ -228,6 +249,52 @@ class Aparser_Worker
 
 		$this->rewrite_and_close_file($tasks_file, implode("\n", $tasks_ids) . "\n");
 	}
+		
+	public function delete_files($params = array())
+	{
+		$this->set_lock('delete_files');
+		$tasks_file = $this->open_and_lock_file(self::DELETE_FILES_FILENAME);
+		if (!$tasks_file)
+		{
+			return FALSE;
+		}
+
+		$tasks_file_content =  fread($tasks_file, filesize(self::DELETE_FILES_FILENAME));
+
+		$tasks_ids = explode("\n", $tasks_file_content);
+		$tasks_ids = self::clear_arr($tasks_ids);
+
+		foreach ($tasks_ids as $key => $task_params)
+		{
+			$task_params_arr = explode(self::DELIMITER, $task_params);
+
+			$task_id = self::arr_get($task_params_arr, 0);
+			$file_to_delete = self::arr_get($task_params_arr, 1);
+
+			$state = $this->send_request(array(
+				'action' => 'getTaskState',
+				'data' => array (
+					'parser' => 'SE::Google',
+					'preset' => 'Pages Count use Proxy',
+					'taskUid' => $task_id //947
+					),
+				'password' => ''
+			));
+
+			if (!$state or !isset($state['data']['status']) or $state['data']['status'] != 'completed')
+			{
+				continue;
+			}
+			if (file_exists($file_to_delete) and is_file($file_to_delete))
+			{
+				@unlink($file_to_delete);
+			}
+
+			unset($tasks_ids[$key]);
+		}
+
+		$this->rewrite_and_close_file($tasks_file, implode("\n", $tasks_ids) . "\n");
+	}
 
 	public function upload_files($params = array())
 	{
@@ -259,6 +326,7 @@ class Aparser_Worker
 			unlink(self::RESULTS_DIR . '/' . $file);
 		}
 	}
+
 }
 
 if (!isset($argv[1]))
